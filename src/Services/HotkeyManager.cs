@@ -9,13 +9,16 @@ namespace SpeedyAppMuter.Services
     public class HotkeyManager : IDisposable
     {
         private readonly Form _messageWindow;
-        private int _hotkeyId = 1;
+        private readonly ILogger _logger;
+        private int _hotkeyId = Constants.Performance.DefaultHotkeyId;
         private bool _disposed = false;
 
         public event EventHandler? HotkeyPressed;
 
-        public HotkeyManager()
+        public HotkeyManager(ILogger? logger = null)
         {
+            _logger = logger ?? Logger.Instance;
+            
             // Create an invisible form to receive Windows messages
             _messageWindow = new Form()
             {
@@ -46,36 +49,32 @@ namespace SpeedyAppMuter.Services
 
                 if (keyCode == 0)
                 {
-                    Debug.WriteLine($"Invalid key: {hotkeyConfig.Key}");
+                    _logger.LogWarning($"Invalid key: {hotkeyConfig.Key}");
                     return false;
                 }
 
-                // Register the hotkey
-                bool success = Win32Helpers.RegisterHotKey(
-                    _messageWindow.Handle,
-                    _hotkeyId,
-                    modifiers,
-                    keyCode
-                );
+                // Unregister any existing hotkey first
+                UnregisterHotkey();
+
+                // Register the new hotkey
+                bool success = Win32Helpers.RegisterHotKey(_messageWindow.Handle, _hotkeyId, modifiers, keyCode);
 
                 if (success)
                 {
-                    Debug.WriteLine($"Registered hotkey: {string.Join("+", hotkeyConfig.Modifiers)}+{hotkeyConfig.Key}");
-                    
-                    // Set up message handling
-                    _messageWindow.KeyDown += OnKeyDown;
-                    Application.AddMessageFilter(new HotkeyMessageFilter(_hotkeyId, OnHotkeyPressed));
+                    // Add message filter to handle WM_HOTKEY messages
+                    Application.AddMessageFilter(new HotkeyMessageFilter(_hotkeyId, () => HotkeyPressed?.Invoke(this, EventArgs.Empty)));
+                    _logger.LogInfo($"Registered hotkey: {string.Join("+", hotkeyConfig.Modifiers)}+{hotkeyConfig.Key}");
                 }
                 else
                 {
-                    Debug.WriteLine($"Failed to register hotkey: {string.Join("+", hotkeyConfig.Modifiers)}+{hotkeyConfig.Key}");
+                    _logger.LogWarning($"Failed to register hotkey: {string.Join("+", hotkeyConfig.Modifiers)}+{hotkeyConfig.Key}");
                 }
 
                 return success;
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"Error registering hotkey: {ex.Message}");
+                _logger.LogError("Error registering hotkey", ex);
                 return false;
             }
         }
@@ -85,21 +84,26 @@ namespace SpeedyAppMuter.Services
         /// </summary>
         public void UnregisterHotkey()
         {
-            if (!_disposed && _messageWindow.Handle != IntPtr.Zero)
+            if (_disposed)
+                return;
+
+            try
             {
                 Win32Helpers.UnregisterHotKey(_messageWindow.Handle, _hotkeyId);
-                Debug.WriteLine("Unregistered hotkey");
+                _logger.LogDebug("Unregistered hotkey");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError("Error unregistering hotkey", ex);
             }
         }
 
-        private void OnKeyDown(object? sender, KeyEventArgs e)
+        /// <summary>
+        /// Simulates a hotkey press for testing purposes
+        /// </summary>
+        public void SimulateHotkeyPress()
         {
-            // This might not be needed, but keeping for potential debugging
-        }
-
-        private void OnHotkeyPressed()
-        {
-            Debug.WriteLine("Hotkey pressed!");
+            _logger.LogDebug("Hotkey pressed!");
             HotkeyPressed?.Invoke(this, EventArgs.Empty);
         }
 
@@ -110,7 +114,10 @@ namespace SpeedyAppMuter.Services
                 UnregisterHotkey();
                 _messageWindow?.Dispose();
                 _disposed = true;
+                _logger.LogDebug("HotkeyManager disposed");
             }
+
+            GC.SuppressFinalize(this);
         }
     }
 

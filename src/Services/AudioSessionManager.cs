@@ -1,4 +1,5 @@
 using NAudio.CoreAudioApi;
+using SpeedyAppMuter.Utils;
 using System;
 using System.Diagnostics;
 using System.Linq;
@@ -9,10 +10,12 @@ namespace SpeedyAppMuter.Services
     {
         private readonly MMDeviceEnumerator _deviceEnumerator;
         private MMDevice? _defaultDevice;
+        private readonly ILogger _logger;
         private bool _disposed = false;
 
-        public AudioSessionManager()
+        public AudioSessionManager(ILogger? logger = null)
         {
+            _logger = logger ?? Logger.Instance;
             _deviceEnumerator = new MMDeviceEnumerator();
             _defaultDevice = _deviceEnumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
         }
@@ -21,140 +24,126 @@ namespace SpeedyAppMuter.Services
         /// Toggles the mute state for all audio sessions belonging to the specified process names
         /// </summary>
         /// <param name="processNames">Array of process names to target (e.g., "firefox", "firefox.exe")</param>
-        /// <returns>True if any sessions were found and toggled, false otherwise</returns>
-        public bool ToggleMuteForProcess(string[] processNames)
+        /// <returns>Result indicating success and whether any sessions were toggled</returns>
+        public Result<bool> ToggleMuteForProcess(string[] processNames)
         {
-            if (_defaultDevice?.AudioSessionManager?.Sessions == null)
-                return false;
-
-            bool anySessionToggled = false;
-            
-            // Normalize process names (remove .exe extension for comparison)
-            var normalizedNames = processNames
-                .Select(name => name.ToLower().Replace(".exe", ""))
-                .ToArray();
-
             try
             {
-                for (int i = 0; i < _defaultDevice.AudioSessionManager.Sessions.Count; i++)
+                bool anySessionToggled = false;
+                var processSessionPairs = ProcessSessionHelper.GetProcessSessions(_defaultDevice, processNames);
+                
+                foreach (var (session, process) in processSessionPairs)
                 {
-                    var session = _defaultDevice.AudioSessionManager.Sessions[i];
-                    
-                    // Skip system sessions
-                    if (session.GetProcessID == 0)
-                        continue;
-
                     try
                     {
-                        // Get the process for this audio session
-                        var process = Process.GetProcessById((int)session.GetProcessID);
-                        var processName = process.ProcessName.ToLower();
-
-                        // Check if this process matches any of our target process names
-                        if (normalizedNames.Contains(processName))
-                        {
-                            // Toggle the mute state
-                            var currentMuteState = session.SimpleAudioVolume.Mute;
-                            session.SimpleAudioVolume.Mute = !currentMuteState;
-                            
-                            anySessionToggled = true;
-                            
-                            Debug.WriteLine($"Toggled mute for {process.ProcessName} (PID: {process.Id}) - Now {(session.SimpleAudioVolume.Mute ? "muted" : "unmuted")}");
-                        }
-                    }
-                    catch (ArgumentException)
-                    {
-                        // Process no longer exists, skip
-                        continue;
+                        // Toggle the mute state
+                        var currentMuteState = session.SimpleAudioVolume.Mute;
+                        session.SimpleAudioVolume.Mute = !currentMuteState;
+                        
+                        anySessionToggled = true;
+                        
+                        _logger.LogInfo($"Toggled mute for {process.ProcessName} (PID: {process.Id}) - Now {(session.SimpleAudioVolume.Mute ? "muted" : "unmuted")}");
                     }
                     catch (Exception ex)
                     {
-                        Debug.WriteLine($"Error processing audio session: {ex.Message}");
+                        _logger.LogError($"Error toggling mute for {process.ProcessName}", ex);
                         continue;
                     }
                 }
+
+                return Result<bool>.Success(anySessionToggled);
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"Error enumerating audio sessions: {ex.Message}");
-                return false;
+                _logger.LogError("Error in ToggleMuteForProcess", ex);
+                return Result<bool>.Failure(ex);
             }
-
-            return anySessionToggled;
         }
 
         /// <summary>
         /// Gets the current mute state for the specified process names
         /// </summary>
         /// <param name="processNames">Array of process names to check</param>
-        /// <returns>True if any matching process is currently muted, false otherwise</returns>
-        public bool IsProcessMuted(string[] processNames)
+        /// <returns>Result indicating success and whether any matching process is muted</returns>
+        public Result<bool> IsProcessMuted(string[] processNames)
         {
-            if (_defaultDevice?.AudioSessionManager?.Sessions == null)
-                return false;
-
-            var normalizedNames = processNames
-                .Select(name => name.ToLower().Replace(".exe", ""))
-                .ToArray();
-
             try
             {
-                for (int i = 0; i < _defaultDevice.AudioSessionManager.Sessions.Count; i++)
+                var processSessionPairs = ProcessSessionHelper.GetProcessSessions(_defaultDevice, processNames);
+                
+                foreach (var (session, process) in processSessionPairs)
                 {
-                    var session = _defaultDevice.AudioSessionManager.Sessions[i];
-                    
-                    if (session.GetProcessID == 0)
-                        continue;
-
                     try
                     {
-                        var process = Process.GetProcessById((int)session.GetProcessID);
-                        var processName = process.ProcessName.ToLower();
-
-                        if (normalizedNames.Contains(processName))
-                        {
-                            if (session.SimpleAudioVolume.Mute)
-                                return true;
-                        }
+                        if (session.SimpleAudioVolume.Mute)
+                            return Result<bool>.Success(true);
                     }
-                    catch (ArgumentException)
+                    catch (Exception ex)
                     {
+                        _logger.LogError($"Error checking mute state for {process.ProcessName}", ex);
                         continue;
                     }
                 }
+
+                return Result<bool>.Success(false);
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"Error checking mute state: {ex.Message}");
+                _logger.LogError("Error in IsProcessMuted", ex);
+                return Result<bool>.Failure(ex);
             }
-
-            return false;
         }
 
         /// <summary>
         /// Checks if any of the specified processes are currently running
         /// </summary>
         /// <param name="processNames">Array of process names to check</param>
-        /// <returns>True if any matching process is running, false otherwise</returns>
-        public bool IsProcessRunning(string[] processNames)
+        /// <returns>Result indicating success and whether any matching process is running</returns>
+        public Result<bool> IsProcessRunning(string[] processNames)
         {
-            var normalizedNames = processNames
-                .Select(name => name.ToLower().Replace(".exe", ""))
-                .ToArray();
-
             try
             {
-                var runningProcesses = Process.GetProcesses()
-                    .Select(p => p.ProcessName.ToLower())
-                    .ToArray();
-
-                return normalizedNames.Any(name => runningProcesses.Contains(name));
+                var isRunning = ProcessSessionHelper.IsAnyProcessRunning(processNames);
+                return Result<bool>.Success(isRunning);
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"Error checking running processes: {ex.Message}");
-                return false;
+                _logger.LogError("Error checking if process is running", ex);
+                return Result<bool>.Failure(ex);
             }
+        }
+
+        /// <summary>
+        /// Legacy method for backward compatibility - toggles mute and returns simple boolean
+        /// </summary>
+        /// <param name="processNames">Array of process names to target</param>
+        /// <returns>True if any sessions were found and toggled, false otherwise</returns>
+        [Obsolete("Use ToggleMuteForProcess that returns Result<bool> instead")]
+        public bool ToggleMuteForProcessLegacy(string[] processNames)
+        {
+            return ToggleMuteForProcess(processNames).GetValueOrDefault(false);
+        }
+
+        /// <summary>
+        /// Legacy method for backward compatibility - checks mute state and returns simple boolean
+        /// </summary>
+        /// <param name="processNames">Array of process names to check</param>
+        /// <returns>True if any matching process is currently muted, false otherwise</returns>
+        [Obsolete("Use IsProcessMuted that returns Result<bool> instead")]
+        public bool IsProcessMutedLegacy(string[] processNames)
+        {
+            return IsProcessMuted(processNames).GetValueOrDefault(false);
+        }
+
+        /// <summary>
+        /// Legacy method for backward compatibility - checks if processes are running and returns simple boolean
+        /// </summary>
+        /// <param name="processNames">Array of process names to check</param>
+        /// <returns>True if any matching process is running, false otherwise</returns>
+        [Obsolete("Use IsProcessRunning that returns Result<bool> instead")]
+        public bool IsProcessRunningLegacy(string[] processNames)
+        {
+            return IsProcessRunning(processNames).GetValueOrDefault(false);
         }
 
         public void Dispose()
@@ -164,7 +153,10 @@ namespace SpeedyAppMuter.Services
                 _defaultDevice?.Dispose();
                 _deviceEnumerator?.Dispose();
                 _disposed = true;
+                _logger.LogDebug("AudioSessionManager disposed");
             }
+
+            GC.SuppressFinalize(this);
         }
     }
 } 
