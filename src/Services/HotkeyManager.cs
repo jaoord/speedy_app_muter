@@ -11,6 +11,7 @@ namespace SpeedyAppMuter.Services
         private readonly Form _messageWindow;
         private readonly ILogger _logger;
         private int _hotkeyId = Constants.Performance.DefaultHotkeyId;
+        private HotkeyMessageFilter? _currentMessageFilter;
         private bool _disposed = false;
 
         public event EventHandler? HotkeyPressed;
@@ -53,7 +54,7 @@ namespace SpeedyAppMuter.Services
                     return false;
                 }
 
-                // Unregister any existing hotkey first
+                // Unregister any existing hotkey first (this also removes the message filter)
                 UnregisterHotkey();
 
                 // Register the new hotkey
@@ -61,8 +62,9 @@ namespace SpeedyAppMuter.Services
 
                 if (success)
                 {
-                    // Add message filter to handle WM_HOTKEY messages
-                    Application.AddMessageFilter(new HotkeyMessageFilter(_hotkeyId, () => HotkeyPressed?.Invoke(this, EventArgs.Empty)));
+                    // Create and add new message filter to handle WM_HOTKEY messages
+                    _currentMessageFilter = new HotkeyMessageFilter(_hotkeyId, () => HotkeyPressed?.Invoke(this, EventArgs.Empty));
+                    Application.AddMessageFilter(_currentMessageFilter);
                     _logger.LogInfo($"Registered hotkey: {string.Join("+", hotkeyConfig.Modifiers)}+{hotkeyConfig.Key}");
                 }
                 else
@@ -89,6 +91,15 @@ namespace SpeedyAppMuter.Services
 
             try
             {
+                // Remove the message filter if it exists
+                if (_currentMessageFilter != null)
+                {
+                    Application.RemoveMessageFilter(_currentMessageFilter);
+                    _currentMessageFilter = null;
+                    _logger.LogDebug("Removed message filter");
+                }
+
+                // Unregister the Win32 hotkey
                 Win32Helpers.UnregisterHotKey(_messageWindow.Handle, _hotkeyId);
                 _logger.LogDebug("Unregistered hotkey");
             }
