@@ -35,9 +35,30 @@ namespace SpeedyAppMuter.Models
     public class AppSettings
     {
         [JsonPropertyName("startMinimized")]
-        public bool StartMinimized { get; set; } = true;
+        public bool StartMinimized { get; } = true;
 
         [JsonPropertyName("showTrayIcon")]
-        public bool ShowTrayIcon { get; set; } = true;
+        public bool ShowTrayIcon { get; } = true;
+
+        [JsonPropertyName("windowState")]
+        public WindowState WindowState { get; set; } = new();
+    }
+
+    public class WindowState
+    {
+        [JsonPropertyName("width")]
+        public int Width { get; set; } = 650;
+
+        [JsonPropertyName("height")]
+        public int Height { get; set; } = 480;
+
+        [JsonPropertyName("x")]
+        public int X { get; set; } = -1; // -1 means center on screen
+
+        [JsonPropertyName("y")]
+        public int Y { get; set; } = -1; // -1 means center on screen
+
+        [JsonPropertyName("isMaximized")]
+        public bool IsMaximized { get; set; } = false;
     }
 } 

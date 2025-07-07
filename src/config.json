@@ -1,14 +1,26 @@
 {
   "targetApplication": {
     "name": "Firefox",
-    "processNames": ["firefox", "firefox.exe"],
+    "processNames": [
+      "firefox"
+    ],
     "hotkey": {
-      "key": "F9",
-      "modifiers": ["Ctrl", "Alt"]
+      "key": "F11",
+      "modifiers": [
+        "Ctrl",
+        "Alt"
+      ]
     }
   },
   "settings": {
     "startMinimized": true,
-    "showTrayIcon": true
+    "showTrayIcon": true,
+    "windowState": {
+      "width": 650,
+      "height": 480,
+      "x": 955,
+      "y": 456,
+      "isMaximized": false
+    }
   }
-} 
+}

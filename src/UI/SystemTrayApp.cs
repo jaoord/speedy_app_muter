@@ -19,19 +19,15 @@ namespace SpeedyAppMuter.UI
 
         public SystemTrayApp()
         {
-            // Initialize services
             _configService = new ConfigurationService();
             _audioManager = new AudioSessionManager();
             _hotkeyManager = new HotkeyManager();
 
-            // Load configuration
             _config = _configService.LoadConfiguration();
             _configService.ValidateConfiguration(_config);
 
-            // Create context menu
             _contextMenu = CreateContextMenu();
 
-            // Create notify icon
             _notifyIcon = new NotifyIcon
             {
                 Icon = CreateIcon(),
@@ -40,11 +36,9 @@ namespace SpeedyAppMuter.UI
                 ContextMenuStrip = _contextMenu
             };
 
-            // Set up event handlers
             _hotkeyManager.HotkeyPressed += OnHotkeyPressed;
             _notifyIcon.DoubleClick += OnTrayIconDoubleClick;
 
-            // Register the hotkey
             RegisterHotkey();
 
             Debug.WriteLine("System tray application initialized successfully");
@@ -54,23 +48,19 @@ namespace SpeedyAppMuter.UI
         {
             var menu = new ContextMenuStrip();
 
-            // Toggle mute menu item
             var toggleMuteItem = new ToolStripMenuItem("Toggle Mute")
             {
                 Font = new Font(menu.Font, FontStyle.Bold)
             };
             toggleMuteItem.Click += (s, e) => ToggleMute();
 
-            // Status menu item (shows current state)
             var statusItem = new ToolStripMenuItem("Status: Ready")
             {
                 Enabled = false
             };
 
-            // Separator
             var separator1 = new ToolStripSeparator();
 
-            // Application info
             var appInfoItem = new ToolStripMenuItem($"Target: {_config.TargetApplication.Name}")
             {
                 Enabled = false
@@ -81,25 +71,22 @@ namespace SpeedyAppMuter.UI
                 Enabled = false
             };
 
-            // Separator
             var separator2 = new ToolStripSeparator();
 
-            // Open config file
+            var settingsItem = new ToolStripMenuItem("Settings...");
+            settingsItem.Click += (s, e) => OpenSettings();
+
             var openConfigItem = new ToolStripMenuItem("Open Config File");
             openConfigItem.Click += (s, e) => OpenConfigFile();
 
-            // Reload config
             var reloadConfigItem = new ToolStripMenuItem("Reload Config");
             reloadConfigItem.Click += (s, e) => ReloadConfiguration();
 
-            // Separator
             var separator3 = new ToolStripSeparator();
 
-            // Exit
             var exitItem = new ToolStripMenuItem("Exit");
             exitItem.Click += (s, e) => Application.Exit();
 
-            // Add items to menu
             menu.Items.AddRange(new ToolStripItem[]
             {
                 toggleMuteItem,
@@ -108,6 +95,7 @@ namespace SpeedyAppMuter.UI
                 appInfoItem,
                 hotkeyInfoItem,
                 separator2,
+                settingsItem,
                 openConfigItem,
                 reloadConfigItem,
                 separator3,
@@ -119,7 +107,6 @@ namespace SpeedyAppMuter.UI
 
         private Icon CreateIcon()
         {
-            // Create a simple icon (you can replace this with a proper icon file)
             var bitmap = new Bitmap(16, 16);
             using (var graphics = Graphics.FromImage(bitmap))
             {
@@ -249,17 +236,13 @@ namespace SpeedyAppMuter.UI
         {
             try
             {
-                // Unregister current hotkey
                 _hotkeyManager.UnregisterHotkey();
 
-                // Reload configuration
                 _config = _configService.LoadConfiguration();
                 _configService.ValidateConfiguration(_config);
 
-                // Register new hotkey
                 RegisterHotkey();
 
-                // Update UI
                 UpdateTrayTooltip();
                 UpdateContextMenuInfo();
 
@@ -272,6 +255,72 @@ namespace SpeedyAppMuter.UI
             {
                 Debug.WriteLine($"Error reloading configuration: {ex.Message}");
                 _notifyIcon.ShowBalloonTip(3000, "Error", "Could not reload configuration", ToolTipIcon.Error);
+            }
+        }
+
+        private void OpenSettings()
+        {
+            try
+            {
+                Debug.WriteLine("Opening settings window...");
+                
+                var configCopy = new AppConfig
+                {
+                    TargetApplication = new TargetApplication
+                    {
+                        Name = _config.TargetApplication.Name,
+                        ProcessNames = _config.TargetApplication.ProcessNames,
+                        Hotkey = new HotkeyConfig
+                        {
+                            Key = _config.TargetApplication.Hotkey.Key,
+                            Modifiers = _config.TargetApplication.Hotkey.Modifiers
+                        }
+                    },
+                    Settings = new AppSettings()
+                };
+
+                var settingsForm = new SettingsForm(configCopy);
+                settingsForm.ConfigurationChanged += OnSettingsChanged;
+                
+                Debug.WriteLine("Showing settings dialog...");
+                var result = settingsForm.ShowDialog();
+                Debug.WriteLine($"Settings dialog result: {result}");
+                
+                if (result == DialogResult.OK)
+                {
+                    Debug.WriteLine("Settings saved successfully");
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Error opening settings: {ex.Message}");
+                Debug.WriteLine($"Stack trace: {ex.StackTrace}");
+                _notifyIcon.ShowBalloonTip(3000, "Error", $"Could not open settings window: {ex.Message}", ToolTipIcon.Error);
+            }
+        }
+
+        private void OnSettingsChanged(object? sender, AppConfig newConfig)
+        {
+            try
+            {
+                _hotkeyManager.UnregisterHotkey();
+
+                _config = newConfig;
+
+                RegisterHotkey();
+
+                UpdateTrayTooltip();
+                UpdateContextMenuInfo();
+
+                Debug.WriteLine("Configuration updated from settings window");
+                _notifyIcon.ShowBalloonTip(2000, "Settings Applied", 
+                    $"Target: {_config.TargetApplication.Name}\nHotkey: {string.Join("+", _config.TargetApplication.Hotkey.Modifiers)}+{_config.TargetApplication.Hotkey.Key}", 
+                    ToolTipIcon.Info);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"Error applying settings: {ex.Message}");
+                _notifyIcon.ShowBalloonTip(3000, "Error", "Could not apply settings", ToolTipIcon.Error);
             }
         }
 
@@ -298,7 +347,6 @@ namespace SpeedyAppMuter.UI
                 Debug.WriteLine("Starting minimized to system tray");
             }
 
-            // Start the message loop
             Application.Run();
         }
 

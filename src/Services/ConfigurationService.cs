@@ -95,11 +95,7 @@ namespace SpeedyAppMuter.Services
                         Modifiers = ["Ctrl", "Alt"]
                     }
                 },
-                Settings = new AppSettings
-                {
-                    StartMinimized = true,
-                    ShowTrayIcon = true
-                }
+                Settings = new AppSettings()
             };
         }
 
