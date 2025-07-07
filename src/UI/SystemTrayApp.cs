@@ -1,144 +1,55 @@
 using SpeedyAppMuter.Models;
 using SpeedyAppMuter.Services;
+using SpeedyAppMuter.Utils;
 using System;
-using System.Diagnostics;
-using System.Drawing;
 using System.Windows.Forms;
 
 namespace SpeedyAppMuter.UI
 {
+    /// <summary>
+    /// Main system tray application coordinator
+    /// Now focused on coordinating between UI and business logic components
+    /// </summary>
     public class SystemTrayApp : IDisposable
     {
-        private readonly NotifyIcon _notifyIcon;
-        private readonly ContextMenuStrip _contextMenu;
-        private readonly ConfigurationService _configService;
-        private readonly AudioSessionManager _audioManager;
-        private readonly HotkeyManager _hotkeyManager;
-        private AppConfig _config;
+        private readonly ApplicationController _controller;
+        private readonly TrayIconManager _trayManager;
+        private readonly ILogger _logger;
         private bool _disposed = false;
 
-        public SystemTrayApp()
+        public SystemTrayApp(ILogger? logger = null)
         {
-            _configService = new ConfigurationService();
-            _audioManager = new AudioSessionManager();
-            _hotkeyManager = new HotkeyManager();
+            _logger = logger ?? Logger.Instance;
+            
+            // Initialize the business logic controller
+            _controller = new ApplicationController(_logger);
+            
+            // Initialize the tray icon manager
+            _trayManager = new TrayIconManager(_controller.Configuration, _logger);
 
-            _config = _configService.LoadConfiguration();
-            _configService.ValidateConfiguration(_config);
+            // Wire up events
+            _controller.HotkeyPressed += OnHotkeyPressed;
+            _controller.ConfigurationChanged += OnConfigurationChanged;
+            
+            _trayManager.ToggleMuteRequested += OnToggleMuteRequested;
+            _trayManager.OpenSettingsRequested += OnOpenSettingsRequested;
+            _trayManager.ReloadConfigRequested += OnReloadConfigRequested;
+            _trayManager.ExitRequested += OnExitRequested;
 
-            _contextMenu = CreateContextMenu();
+            // Update initial UI state
+            UpdateUI();
 
-            _notifyIcon = new NotifyIcon
-            {
-                Icon = CreateIcon(),
-                Text = $"Speedy App Muter - {_config.TargetApplication.Name}",
-                Visible = _config.Settings.ShowTrayIcon,
-                ContextMenuStrip = _contextMenu
-            };
-
-            _hotkeyManager.HotkeyPressed += OnHotkeyPressed;
-            _notifyIcon.DoubleClick += OnTrayIconDoubleClick;
-
-            RegisterHotkey();
-
-            Debug.WriteLine("System tray application initialized successfully");
+            _logger.LogInfo("System tray application initialized successfully");
         }
 
-        private ContextMenuStrip CreateContextMenu()
+        public void Run()
         {
-            var menu = new ContextMenuStrip();
-
-            var toggleMuteItem = new ToolStripMenuItem("Toggle Mute")
+            if (_controller.Configuration.Settings.StartMinimized)
             {
-                Font = new Font(menu.Font, FontStyle.Bold)
-            };
-            toggleMuteItem.Click += (s, e) => ToggleMute();
-
-            var statusItem = new ToolStripMenuItem("Status: Ready")
-            {
-                Enabled = false
-            };
-
-            var separator1 = new ToolStripSeparator();
-
-            var appInfoItem = new ToolStripMenuItem($"Target: {_config.TargetApplication.Name}")
-            {
-                Enabled = false
-            };
-
-            var hotkeyInfoItem = new ToolStripMenuItem($"Hotkey: {string.Join("+", _config.TargetApplication.Hotkey.Modifiers)}+{_config.TargetApplication.Hotkey.Key}")
-            {
-                Enabled = false
-            };
-
-            var separator2 = new ToolStripSeparator();
-
-            var settingsItem = new ToolStripMenuItem("Settings...");
-            settingsItem.Click += (s, e) => OpenSettings();
-
-            var openConfigItem = new ToolStripMenuItem("Open Config File");
-            openConfigItem.Click += (s, e) => OpenConfigFile();
-
-            var reloadConfigItem = new ToolStripMenuItem("Reload Config");
-            reloadConfigItem.Click += (s, e) => ReloadConfiguration();
-
-            var separator3 = new ToolStripSeparator();
-
-            var exitItem = new ToolStripMenuItem("Exit");
-            exitItem.Click += (s, e) => Application.Exit();
-
-            menu.Items.AddRange(new ToolStripItem[]
-            {
-                toggleMuteItem,
-                statusItem,
-                separator1,
-                appInfoItem,
-                hotkeyInfoItem,
-                separator2,
-                settingsItem,
-                openConfigItem,
-                reloadConfigItem,
-                separator3,
-                exitItem
-            });
-
-            return menu;
-        }
-
-        private Icon CreateIcon()
-        {
-            var bitmap = new Bitmap(16, 16);
-            using (var graphics = Graphics.FromImage(bitmap))
-            {
-                graphics.Clear(Color.Transparent);
-                graphics.FillEllipse(Brushes.Blue, 2, 2, 12, 12);
-                graphics.DrawString("M", new Font("Arial", 8, FontStyle.Bold), Brushes.White, 4, 2);
+                _logger.LogInfo("Starting minimized to system tray");
             }
-            return Icon.FromHandle(bitmap.GetHicon());
-        }
 
-        private void RegisterHotkey()
-        {
-            try
-            {
-                bool success = _hotkeyManager.RegisterHotkey(_config.TargetApplication.Hotkey);
-                if (success)
-                {
-                    Debug.WriteLine("Hotkey registered successfully");
-                    UpdateTrayTooltip();
-                }
-                else
-                {
-                    Debug.WriteLine("Failed to register hotkey");
-                    _notifyIcon.ShowBalloonTip(3000, "Hotkey Registration Failed", 
-                        $"Could not register hotkey: {string.Join("+", _config.TargetApplication.Hotkey.Modifiers)}+{_config.TargetApplication.Hotkey.Key}", 
-                        ToolTipIcon.Warning);
-                }
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"Error registering hotkey: {ex.Message}");
-            }
+            Application.Run();
         }
 
         private void OnHotkeyPressed(object? sender, EventArgs e)
@@ -146,220 +57,144 @@ namespace SpeedyAppMuter.UI
             ToggleMute();
         }
 
-        private void OnTrayIconDoubleClick(object? sender, EventArgs e)
+        private void OnToggleMuteRequested(object? sender, EventArgs e)
         {
             ToggleMute();
         }
 
         private void ToggleMute()
         {
-            try
-            {
-                bool success = _audioManager.ToggleMuteForProcess(_config.TargetApplication.ProcessNames);
-                
-                if (success)
-                {
-                    bool isMuted = _audioManager.IsProcessMuted(_config.TargetApplication.ProcessNames);
-                    Debug.WriteLine($"Audio toggled - {_config.TargetApplication.Name} is now {(isMuted ? "muted" : "unmuted")}");
-                    UpdateTrayIcon(isMuted);
-                }
-                else
-                {
-                    Debug.WriteLine($"No audio sessions found for {_config.TargetApplication.Name}");
-                    UpdateTrayIcon(false);
-                }
-
-                UpdateContextMenuStatus();
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"Error toggling mute: {ex.Message}");
-            }
-        }
-
-        private void UpdateTrayIcon(bool isMuted)
-        {
-            // Update icon color based on mute state
-            var bitmap = new Bitmap(16, 16);
-            using (var graphics = Graphics.FromImage(bitmap))
-            {
-                graphics.Clear(Color.Transparent);
-                var brush = isMuted ? Brushes.Red : Brushes.Blue;
-                graphics.FillEllipse(brush, 2, 2, 12, 12);
-                graphics.DrawString("M", new Font("Arial", 8, FontStyle.Bold), Brushes.White, 4, 2);
-            }
+            var result = _controller.ToggleMute();
             
-            _notifyIcon.Icon?.Dispose();
-            _notifyIcon.Icon = Icon.FromHandle(bitmap.GetHicon());
+            result.OnFailure(error => 
+            {
+                _trayManager.ShowBalloonTip(Constants.UI.BalloonTipTimeout, Constants.Messages.ErrorTitle, 
+                    "Failed to toggle mute", ToolTipIcon.Error);
+            });
+
+            UpdateUI();
         }
 
-        private void UpdateTrayTooltip()
+        private void OnOpenSettingsRequested(object? sender, EventArgs e)
         {
-            bool isRunning = _audioManager.IsProcessRunning(_config.TargetApplication.ProcessNames);
-            bool isMuted = isRunning ? _audioManager.IsProcessMuted(_config.TargetApplication.ProcessNames) : false;
-            
-            string status = isRunning ? (isMuted ? "Muted" : "Running") : "Not Running";
-            _notifyIcon.Text = $"Speedy App Muter - {_config.TargetApplication.Name} ({status})";
-        }
-
-        private void UpdateContextMenuStatus()
-        {
-            if (_contextMenu.Items.Count > 1 && _contextMenu.Items[1] is ToolStripMenuItem statusItem)
-            {
-                bool isRunning = _audioManager.IsProcessRunning(_config.TargetApplication.ProcessNames);
-                bool isMuted = isRunning ? _audioManager.IsProcessMuted(_config.TargetApplication.ProcessNames) : false;
-                
-                string status = isRunning ? (isMuted ? "Muted" : "Running") : "Not Running";
-                statusItem.Text = $"Status: {status}";
-            }
-        }
-
-        private void OpenConfigFile()
-        {
-            try
-            {
-                string configPath = _configService.GetConfigFilePath();
-                Process.Start(new ProcessStartInfo
-                {
-                    FileName = configPath,
-                    UseShellExecute = true
-                });
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"Error opening config file: {ex.Message}");
-                _notifyIcon.ShowBalloonTip(3000, "Error", "Could not open config file", ToolTipIcon.Error);
-            }
-        }
-
-        private void ReloadConfiguration()
-        {
-            try
-            {
-                _hotkeyManager.UnregisterHotkey();
-
-                _config = _configService.LoadConfiguration();
-                _configService.ValidateConfiguration(_config);
-
-                RegisterHotkey();
-
-                UpdateTrayTooltip();
-                UpdateContextMenuInfo();
-
-                Debug.WriteLine("Configuration reloaded successfully");
-                _notifyIcon.ShowBalloonTip(2000, "Configuration Reloaded", 
-                    $"Target: {_config.TargetApplication.Name}\nHotkey: {string.Join("+", _config.TargetApplication.Hotkey.Modifiers)}+{_config.TargetApplication.Hotkey.Key}", 
-                    ToolTipIcon.Info);
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"Error reloading configuration: {ex.Message}");
-                _notifyIcon.ShowBalloonTip(3000, "Error", "Could not reload configuration", ToolTipIcon.Error);
-            }
+            OpenSettings();
         }
 
         private void OpenSettings()
         {
             try
             {
-                Debug.WriteLine("Opening settings window...");
+                _logger.LogDebug("Opening settings window...");
                 
-                var configCopy = new AppConfig
-                {
-                    TargetApplication = new TargetApplication
-                    {
-                        Name = _config.TargetApplication.Name,
-                        ProcessNames = _config.TargetApplication.ProcessNames,
-                        Hotkey = new HotkeyConfig
-                        {
-                            Key = _config.TargetApplication.Hotkey.Key,
-                            Modifiers = _config.TargetApplication.Hotkey.Modifiers
-                        }
-                    },
-                    Settings = new AppSettings()
-                };
-
+                var configCopy = CreateConfigCopy(_controller.Configuration);
                 var settingsForm = new SettingsForm(configCopy);
                 settingsForm.ConfigurationChanged += OnSettingsChanged;
                 
-                Debug.WriteLine("Showing settings dialog...");
+                _logger.LogDebug("Showing settings dialog...");
                 var result = settingsForm.ShowDialog();
-                Debug.WriteLine($"Settings dialog result: {result}");
+                _logger.LogDebug($"Settings dialog result: {result}");
                 
                 if (result == DialogResult.OK)
                 {
-                    Debug.WriteLine("Settings saved successfully");
+                    _logger.LogInfo("Settings saved successfully");
                 }
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"Error opening settings: {ex.Message}");
-                Debug.WriteLine($"Stack trace: {ex.StackTrace}");
-                _notifyIcon.ShowBalloonTip(3000, "Error", $"Could not open settings window: {ex.Message}", ToolTipIcon.Error);
+                _logger.LogError("Error opening settings", ex);
+                _trayManager.ShowBalloonTip(Constants.UI.BalloonTipTimeout, Constants.Messages.ErrorTitle, 
+                    $"Could not open settings window: {ex.Message}", ToolTipIcon.Error);
             }
         }
 
         private void OnSettingsChanged(object? sender, AppConfig newConfig)
         {
-            try
+            var result = _controller.ApplyConfiguration(newConfig);
+            
+            result.OnSuccess(() =>
             {
-                _hotkeyManager.UnregisterHotkey();
-
-                _config = newConfig;
-
-                RegisterHotkey();
-
-                UpdateTrayTooltip();
-                UpdateContextMenuInfo();
-
-                Debug.WriteLine("Configuration updated from settings window");
-                _notifyIcon.ShowBalloonTip(2000, "Settings Applied", 
-                    $"Target: {_config.TargetApplication.Name}\nHotkey: {string.Join("+", _config.TargetApplication.Hotkey.Modifiers)}+{_config.TargetApplication.Hotkey.Key}", 
+                _trayManager.ShowBalloonTip(Constants.UI.SuccessBalloonTipTimeout, Constants.Messages.SettingsAppliedTitle, 
+                    $"Target: {newConfig.TargetApplication.Name}\nHotkey: {string.Join("+", newConfig.TargetApplication.Hotkey.Modifiers)}+{newConfig.TargetApplication.Hotkey.Key}", 
                     ToolTipIcon.Info);
-            }
-            catch (Exception ex)
+            })
+            .OnFailure(error =>
             {
-                Debug.WriteLine($"Error applying settings: {ex.Message}");
-                _notifyIcon.ShowBalloonTip(3000, "Error", "Could not apply settings", ToolTipIcon.Error);
-            }
+                _trayManager.ShowBalloonTip(Constants.UI.BalloonTipTimeout, Constants.Messages.ErrorTitle, 
+                    "Could not apply settings", ToolTipIcon.Error);
+            });
+
+            UpdateUI();
         }
 
-        private void UpdateContextMenuInfo()
+        private void OnReloadConfigRequested(object? sender, EventArgs e)
         {
-            if (_contextMenu.Items.Count > 4)
+            var result = _controller.ReloadConfiguration();
+            
+            result.OnSuccess(() =>
             {
-                if (_contextMenu.Items[3] is ToolStripMenuItem appInfoItem)
-                {
-                    appInfoItem.Text = $"Target: {_config.TargetApplication.Name}";
-                }
-                
-                if (_contextMenu.Items[4] is ToolStripMenuItem hotkeyInfoItem)
-                {
-                    hotkeyInfoItem.Text = $"Hotkey: {string.Join("+", _config.TargetApplication.Hotkey.Modifiers)}+{_config.TargetApplication.Hotkey.Key}";
-                }
-            }
+                var config = _controller.Configuration;
+                _trayManager.ShowBalloonTip(Constants.UI.SuccessBalloonTipTimeout, Constants.Messages.ConfigurationReloadedTitle, 
+                    $"Target: {config.TargetApplication.Name}\nHotkey: {string.Join("+", config.TargetApplication.Hotkey.Modifiers)}+{config.TargetApplication.Hotkey.Key}", 
+                    ToolTipIcon.Info);
+            })
+            .OnFailure(error =>
+            {
+                _trayManager.ShowBalloonTip(Constants.UI.BalloonTipTimeout, Constants.Messages.ErrorTitle, 
+                    "Could not reload configuration", ToolTipIcon.Error);
+            });
+
+            UpdateUI();
         }
 
-        public void Run()
+        private void OnExitRequested(object? sender, EventArgs e)
         {
-            if (_config.Settings.StartMinimized)
-            {
-                Debug.WriteLine("Starting minimized to system tray");
-            }
+            Application.Exit();
+        }
 
-            Application.Run();
+        private void OnConfigurationChanged(object? sender, AppConfig newConfig)
+        {
+            UpdateUI();
+        }
+
+        private void UpdateUI()
+        {
+            var (isRunning, isMuted) = _controller.GetStatus();
+            var config = _controller.Configuration;
+
+            _trayManager.UpdateIcon(isMuted);
+            _trayManager.UpdateTooltip(config, isRunning, isMuted);
+            _trayManager.UpdateContextMenu(config, isRunning, isMuted);
+        }
+
+        private AppConfig CreateConfigCopy(AppConfig original)
+        {
+            return new AppConfig
+            {
+                TargetApplication = new TargetApplication
+                {
+                    Name = original.TargetApplication.Name,
+                    ProcessNames = original.TargetApplication.ProcessNames,
+                    Hotkey = new HotkeyConfig
+                    {
+                        Key = original.TargetApplication.Hotkey.Key,
+                        Modifiers = original.TargetApplication.Hotkey.Modifiers
+                    }
+                },
+                Settings = new AppSettings()
+            };
         }
 
         public void Dispose()
         {
             if (!_disposed)
             {
-                _hotkeyManager?.Dispose();
-                _audioManager?.Dispose();
-                _contextMenu?.Dispose();
-                _notifyIcon?.Dispose();
+                _controller?.Dispose();
+                _trayManager?.Dispose();
                 _disposed = true;
+                _logger.LogDebug("SystemTrayApp disposed");
             }
+
+            GC.SuppressFinalize(this);
         }
     }
 } 

@@ -1,6 +1,6 @@
 {
   "targetApplication": {
-    "name": "Firefox",
+    "name": "Mozilla Firefox",
     "processNames": [
       "firefox"
     ],
@@ -17,7 +17,7 @@
     "showTrayIcon": true,
     "windowState": {
       "width": 650,
-      "height": 480,
+      "height": 512,
       "x": 955,
       "y": 456,
       "isMaximized": false

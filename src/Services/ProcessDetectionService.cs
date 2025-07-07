@@ -28,54 +28,30 @@ namespace SpeedyAppMuter.Services
         {
             var processesWithAudio = new List<ProcessInfo>();
 
-            if (_defaultDevice?.AudioSessionManager?.Sessions == null)
-                return processesWithAudio;
-
-            var seenProcesses = new HashSet<int>();
-
             try
             {
-                for (int i = 0; i < _defaultDevice.AudioSessionManager.Sessions.Count; i++)
+                var uniqueProcesses = ProcessSessionHelper.GetUniqueProcessesWithAudio(_defaultDevice);
+                
+                foreach (var process in uniqueProcesses)
                 {
-                    var session = _defaultDevice.AudioSessionManager.Sessions[i];
-                    
-                    // Skip system sessions
-                    if (session.GetProcessID == 0)
-                        continue;
-
-                    var processId = (int)session.GetProcessID;
-                    
-                    // Skip if we've already processed this process
-                    if (seenProcesses.Contains(processId))
-                        continue;
-
-                    seenProcesses.Add(processId);
-
                     try
                     {
-                        var process = Process.GetProcessById(processId);
                         var processInfo = CreateProcessInfo(process, true);
-                        
                         if (processInfo != null)
                         {
                             processesWithAudio.Add(processInfo);
                         }
                     }
-                    catch (ArgumentException)
-                    {
-                        // Process no longer exists, skip
-                        continue;
-                    }
                     catch (Exception ex)
                     {
-                        Debug.WriteLine($"Error getting process info for PID {processId}: {ex.Message}");
+                        Debug.WriteLine($"Error creating ProcessInfo for {process.ProcessName}: {ex.Message}");
                         continue;
                     }
                 }
             }
             catch (Exception ex)
             {
-                Debug.WriteLine($"Error enumerating audio sessions: {ex.Message}");
+                Debug.WriteLine($"Error getting processes with audio: {ex.Message}");
             }
 
             return processesWithAudio.OrderBy(p => p.DisplayName).ToList();
@@ -215,6 +191,8 @@ namespace SpeedyAppMuter.Services
                 _deviceEnumerator?.Dispose();
                 _disposed = true;
             }
+
+            GC.SuppressFinalize(this);
         }
     }
 } 
