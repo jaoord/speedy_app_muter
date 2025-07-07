@@ -1,0 +1,14 @@
+{
+  "targetApplication": {
+    "name": "Firefox",
+    "processNames": ["firefox", "firefox.exe"],
+    "hotkey": {
+      "key": "F9",
+      "modifiers": ["Ctrl", "Alt"]
+    }
+  },
+  "settings": {
+    "startMinimized": true,
+    "showTrayIcon": true
+  }
+} 
